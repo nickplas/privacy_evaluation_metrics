@@ -486,7 +486,7 @@ class PrivacyMetrics:
 
         if len(numeric_cols) < 1:  # There are numeric columns?
             synth = weap(synth, keys, target, radius, numeric_cols)
-            print('Length after weap only categorical', len(synth))
+            # print('Length after weap only categorical', len(synth))
             sum_t_k = 0.0
             sum_k = 0.0
             for i, r in synth.iterrows():  # Compute equivalence class as is done in the weap
@@ -503,7 +503,6 @@ class PrivacyMetrics:
             # sum_t_k = 0.0
             for i in idxs:
                 row = rows[i]
-                # TODO: risolve il problema temporaneamente
                 row = row.to_frame().T.astype(train.dtypes)
 
                 t_k_eq = pd.merge(row, train, how='inner', on=cat_t_k)
