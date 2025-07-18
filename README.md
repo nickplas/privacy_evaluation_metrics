@@ -1,6 +1,6 @@
 # privacy_evaluation_metrics
-Code for the paper "Empirical Evaluation of Synthetic Data Privacy Metrics]{Empirical Evaluation of Structured Synthetic
-Data Privacy Metrics: Novel framework and application to no-box metrics"
+
+A python package for evaluating privacy and utility for single-table datasets.
 
 ### Installation
 
@@ -27,7 +27,12 @@ Adult dataset that can be downloaded from [here](https://archive.ics.uci.edu/dat
 - [x] Inference
 - [x] Machine Learning Inference
 - [x] GTCAP
+- [x] DOMIAS
 
 # Tested Utility Metrics
 
 - [x] Machine Learning Efficacy
+- [x] Regression and Classification on a subset
+- [x] K-S test
+- [x] Chi-Squared Test
+- [x] Maximum Mean Discrepancy

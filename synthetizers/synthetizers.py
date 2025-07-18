@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import List
+from privacy_metrics.preprocessor import Data
 
 def leaky_synthesize(release_df: pd.DataFrame, train_df: pd.DataFrame, leak_frac: float) -> pd.DataFrame:
     """Create a mock synthetic dataset consisting of records from the independent dataframe release_df where a
@@ -69,15 +70,15 @@ def noisy_leak_synthesize(release_df: pd.DataFrame, train_df: pd.DataFrame, leak
     leak_size = int(synth_size * leak_frac)
     leak_records = train_df.sample(leak_size)
     for col, col_type in col_to_noise.items():
-        if col_type == 'categorical':
+        if col_type == Data.CATEGORICAL:
             categories = leak_records[col].unique()
             val_counts = leak_records[col].value_counts(dropna=False)
             switch_frequencies = [val_counts.loc[c] / len(leak_records) for c in categories]
             leak_records[col] = column_noiser(leak_records[col], cat_switch_prob=cat_switch_prob,
                                               switch_categories=categories, cat_relative_frequencies=switch_frequencies)
-        elif col_type == 'numeric':
+        elif col_type == Data.NUMERIC:
             leak_records[col] = column_noiser(leak_records[col], numeric_noise_level=numeric_noise_level)
-        elif col_type == 'integer':
+        elif col_type == Data.INTEGER:
             leak_records[col] = column_noiser(leak_records[col], integer_noise_level=integer_noise_level)
     if leak_frac == 1.:
         synth_df = leak_records

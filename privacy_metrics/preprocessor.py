@@ -3,6 +3,16 @@ from typing import List, Dict
 from itertools import islice
 from sklearn.preprocessing import StandardScaler, LabelEncoder, OrdinalEncoder
 from tqdm import tqdm
+from enum import Enum
+
+class Data(str, Enum):
+    NUMERIC = "numeric"
+    CATEGORICAL = "categorical"
+    CATEGORICAL_ORD = "categorical_ord"
+    DATE = "date"
+    DATETIME = "datetime"
+    INTEGER = "integer"
+
 
 def raiser(): raise ValueError('attribute type must be in ["numeric", "categorical", "ordinal", "already_preprocessed"]')
 
@@ -71,25 +81,27 @@ class Preprocessor:
     def __init__(self,
                  schema: Dict,
                  ordered_categories: Dict = None,
+                 verbose: bool = False,
                  ):
         self.schema = schema
-        self.preprocessor = {name: StandardScalerNAN() if attribute_type == 'numeric'
-                                   else OrdinalEncoder(handle_unknown='use_encoded_value', categories=ordered_categories[name]) if attribute_type == 'ordinal'
-                                   else LabelEncoderUnseenCategories() if attribute_type == 'categorical'
+        self.preprocessor = {name: StandardScalerNAN() if attribute_type == Data.NUMERIC
+                                   else OrdinalEncoder(handle_unknown='use_encoded_value', categories=ordered_categories[name]) if attribute_type == Data.CATEGORICAL_ORD
+                                   else LabelEncoderUnseenCategories() if attribute_type == Data.CATEGORICAL
                                    else None if attribute_type == 'already_preprocessed'
                                    else raiser()
                              for name, attribute_type in schema.items()}
+        self.verbose = verbose
 
 
     def fit(self, data: pd.DataFrame) -> None:
-        for name, preproc in tqdm(self.preprocessor.items(), desc="Fitting preprocessor"):
+        for name, preproc in tqdm(self.preprocessor.items(), desc="Fitting preprocessor", disable=not self.verbose):
             if preproc is None:
                 continue
             preproc.fit(data[name])
 
     def transform(self, data: pd.DataFrame) -> Dict:
         d = {}
-        for name, preproc in tqdm(self.preprocessor.items(), desc="Transforming preprocessor"):
+        for name, preproc in tqdm(self.preprocessor.items(), desc="Transforming preprocessor", disable=not self.verbose):
             if preproc is None:
                 continue
             d[name] = preproc.transform(data[name])

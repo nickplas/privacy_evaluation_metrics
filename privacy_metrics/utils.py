@@ -10,6 +10,15 @@ def risk_fn(
         risk_train: float,
         risk_control: float
 ) -> float:
+    """Computing risk using the control set as a baseline for the risk
+
+    Args:
+        risk_train (float): The risk value for the train set
+        risk_control (float): The risk value for the control set
+
+    Returns:
+        float: The risk value
+    """
     return (risk_train - risk_control) / (1 - risk_control)
 
 
@@ -25,7 +34,6 @@ def replace_missing_values(
 
     Returns:
         pd.DataFrame: Modified dataset.
-
     """
     for col, col_type in schema.items():
         if col_type == 'categorical':
@@ -53,7 +61,7 @@ def weap(
     Returns:
         tuple[pd.DataFrame, Dict, List]: Returns a tuple containing: the modified dataset, the original rows
         with their indexes, and the indexes
-        """
+    """
     k_t = keys + [target]
 
     # get the only attribute needed
@@ -147,7 +155,7 @@ def pad_target_keys_array(
         score_t_k (np.ndarray): Score for the target+keys dataset.
 
     Returns:
-        (np.ndarray): New score for the padded dataset.
+        np.ndarray: New score for the padded dataset.
     """
     if len(t_k_eq) == len(k_eq): # No need to pad the dataset
         return score_t_k
@@ -266,4 +274,3 @@ def compute_dxy(
 
     knn_results = knn_index.compute_nearest_neighbors(real_transform, synth_transform)
     return knn_results.d_xy
-

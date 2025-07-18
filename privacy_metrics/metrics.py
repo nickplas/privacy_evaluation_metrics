@@ -16,12 +16,15 @@ from .utils import replace_missing_values, weap, pad_target_keys_array
 from .utils import normalized_rmse
 
 from .utils import compute_values_below_alpha_percentile
-from .preprocessor import Preprocessor
+from .preprocessor import Preprocessor, Data
 from .indexes_neighbors_search import NearestNeighbor_faiss, NearestNeighbor_sklearn
 
 from .utils import transform_mia, transform_points, compute_dxy
 from sklearn.metrics import auc
 
+from domias.bnaf.density_estimation import compute_log_p_x, density_estimator_trainer
+import torch
+from sklearn.model_selection import train_test_split
 
 class PrivacyMetrics:
     """Privacy metrics class"""
@@ -31,7 +34,7 @@ class PrivacyMetrics:
             train: pd.DataFrame,
             synthetic: pd.DataFrame,
             control: pd.DataFrame,
-            schema: Dict | None = None
+            schema: Dict[str, Data]
     ):
 
         """Contruct the object
@@ -325,12 +328,11 @@ class PrivacyMetrics:
         return risk, ci
 
     # ML Inference
-    @staticmethod
     def __inference_with_ML(
+            self,
             train: pd.DataFrame,
             test: pd.DataFrame,
             target: str,
-            target_type: str
     ) -> float:
         """Internal computation for Machine Learning Inference.
 
@@ -338,7 +340,6 @@ class PrivacyMetrics:
             train (pd.Dataframe): dataset used to train the model, usually is the synthetic data
             test (pd.Dataframe): dataset used to test the model, usually the train data
             target (str): name of the target column
-            target_type (str): type of the target column
 
         Returns:
             float: Accuracy of the inference attack.
@@ -350,10 +351,10 @@ class PrivacyMetrics:
         train_x.drop('index', axis=1, inplace=True) if 'index' in train_x.columns else 0
         test_x.drop('index', axis=1, inplace=True) if 'index' in test_x.columns else 0
 
-        if target_type == 'category':
+        if self.schema[target] == Data.CATEGORICAL:
             model = XGBClassifier()
             acc_score_fn = accuracy_score
-        elif target_type == 'numeric':
+        elif self.schema[target] == Data.NUMERIC:
             model = XGBRegressor()
             acc_score_fn = normalized_rmse
         else:
@@ -367,7 +368,6 @@ class PrivacyMetrics:
     def __compute_confidence_interval_inference_with_ML(
             self,
             target: str,
-            target_type: str,
             confidence_level: float = 0.95,
             iterations=1000
     ) -> float:
@@ -375,7 +375,6 @@ class PrivacyMetrics:
 
         Args:
             target (str): name of the target column
-            target_type (str): type of the target column
             confidence_level (float): The confidence level of the confidence interval.
             iterations (int): The number of iterations to compute the confidence interval via bootstrapping.
 
@@ -386,7 +385,7 @@ class PrivacyMetrics:
         synth_samples = [self.synthetic.sample(n=len(self.synthetic), replace=True, random_state=i) for i in
                          range(iterations)]
 
-        ml_scores = [self.__inference_with_ML(t, s, target, target_type) for t, s in
+        ml_scores = [self.__inference_with_ML(t, s, target) for t, s in
                      tqdm(zip(train_samples, synth_samples), desc='Computing confidence interval')]
 
         lower_confidence_level = (1 - confidence_level) / 2
@@ -400,7 +399,6 @@ class PrivacyMetrics:
     def machine_learning_inference(
             self,
             target: str,
-            target_type: str,
             confidence_level: float = 0.95,
             iterations: int = 1000
     ) -> (float, float):
@@ -408,7 +406,6 @@ class PrivacyMetrics:
 
         Args:
             target (str): Target column name.
-            target_type (str): Target column name.
             confidence_level (float): The confidence level of the confidence interval.
             iterations (int): The number of iterations to compute the confidence interval via bootstrapping.
 
@@ -417,7 +414,7 @@ class PrivacyMetrics:
 
         """
         for c in self.train.columns:
-            if self.train[c].dtype == 'object':
+            if self.schema[c] == Data.CATEGORICAL:
                 le = LabelEncoder()
                 self.train[c] = le.fit_transform(self.train[c]).astype(int)
                 self.control[c] = le.fit_transform(self.control[c]).astype(int)
@@ -425,10 +422,10 @@ class PrivacyMetrics:
         self.train.dropna(inplace=True)
         self.control.dropna(inplace=True)
         self.synthetic.dropna(inplace=True)
-        risk_train = self.__inference_with_ML(self.synthetic, self.train, target, target_type)
-        risk_control = self.__inference_with_ML(self.synthetic, self.control, target, target_type)
+        risk_train = self.__inference_with_ML(self.synthetic, self.train, target)
+        risk_control = self.__inference_with_ML(self.synthetic, self.control, target)
         risk = (risk_train - risk_control) / (1 - risk_control)
-        ci = self.__compute_confidence_interval_inference_with_ML(target, target_type, confidence_level, iterations)
+        ci = self.__compute_confidence_interval_inference_with_ML(target, confidence_level, iterations)
         return risk, ci
 
     # GTCAP
@@ -602,7 +599,7 @@ class PrivacyMetrics:
             min_multivariate_cols: None | int = None,
             univariate_mode: bool = True,
             confidence_level: float = 0.95,
-            keep_unreliable=False
+            keep_unreliable: bool = False
     ) -> dict:
         """Calculates Singling Out risk for univariate and multivariate estimations and returns the highest value.
 
@@ -844,4 +841,72 @@ class PrivacyMetrics:
                 inference_risks['control_score'].append(None)
 
         return inference_risks
+
+
+    def DOMIAS(
+            self,
+            device: str
+    ) -> (float, float):
+        """ DOMIAS proposed in: https://arxiv.org/pdf/2302.12580,
+            original code: https://github.com/vanderschaarlab/DOMIAS/tree/main,
+
+        Args:
+            device: str. Device to use.
+
+        Returns:
+            (float, float): DOMIAS and baseline score.
+        """
+
+        train = self.train.copy()
+        synthetic = self.synthetic.copy()
+        control = self.control.copy()
+
+        for c in self.train.columns:
+            if self.schema[c] == Data.CATEGORICAL:
+                le = LabelEncoder()
+                train[c] = pd.to_numeric(le.fit_transform(train[c]))
+                synthetic[c] = pd.to_numeric(le.fit_transform(synthetic[c]))
+                control[c] = pd.to_numeric(le.fit_transform(control[c]))
+
+        train_sets = train_test_split(train, test_size=0.5, random_state=42)
+        synthetic_sets = train_test_split(synthetic, test_size=0.5, random_state=42)
+        control_sets = train_test_split(control, test_size=0.5, random_state=42)
+
+        X_test = pd.concat([train_sets[1], synthetic_sets[1]],
+                           ignore_index=True).to_numpy()
+        X_baseline = pd.concat([train_sets[1], control_sets[1]],
+                           ignore_index=True).to_numpy()
+
+        _, real_model = density_estimator_trainer(train_sets[0].to_numpy())
+        real_density = np.exp(
+                compute_log_p_x(real_model, torch.as_tensor(X_test).float().to(device))
+                .cpu()
+                .detach()
+                .numpy()
+        )
+        _, synth_model = density_estimator_trainer(synthetic_sets[0].to_numpy())
+        synth_density = np.exp(
+            compute_log_p_x(synth_model, torch.as_tensor(X_test).float().to(device))
+            .cpu()
+            .detach()
+            .numpy()
+        )
+
+        _, real_model_baseline = density_estimator_trainer(train_sets[0].to_numpy())
+        real_density_baseline = np.exp(
+            compute_log_p_x(real_model, torch.as_tensor(X_baseline).float().to(device))
+            .cpu()
+            .detach()
+            .numpy()
+        )
+
+        _, baseline_model = density_estimator_trainer(control_sets[0].to_numpy())
+        baseline_density = np.exp(
+            compute_log_p_x(baseline_model, torch.as_tensor(X_baseline).float().to(device))
+            .cpu()
+            .detach()
+            .numpy()
+        )
+
+        return synth_density/(real_density + 1e-8), baseline_density/(real_density_baseline + 1e-8)
 
