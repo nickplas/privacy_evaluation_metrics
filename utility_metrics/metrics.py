@@ -11,7 +11,14 @@ from .utils import categorical_kernel, kernel_score, normalized_polynomial_kerne
 from privacy_metrics.preprocessor import Data
 
 class UtilityMetrics:
-    """Utility Metrics class"""
+    """Utility Metrics class
+
+        Part of the metrics are inspired by the Synthcity library.
+        Link: https://github.com/vanderschaarlab/synthcity/tree/main
+
+    """
+
+
 
     def __init__(
             self,
@@ -148,7 +155,7 @@ class UtilityMetrics:
         """
         res = {}
         for c in self.train.columns:
-            if self.schema[c] == 'numeric':
+            if self.schema[c] == Data.NUMERIC:
                 stat, p_val = ks_2samp(self.train[c], self.synthetic[c])
                 res[c] = {'statistic': stat, 'p_value': p_val}
         return res
