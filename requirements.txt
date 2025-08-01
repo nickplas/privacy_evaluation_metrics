@@ -1,4 +1,4 @@
-anonymeter==1.0.0
+#anonymeter==1.0.0
 anyio==4.9.0
 appnope==0.1.4
 argon2-cffi==23.1.0
