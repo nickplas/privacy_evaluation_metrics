@@ -7,7 +7,7 @@ from anonymeter.evaluators import LinkabilityEvaluator, SinglingOutEvaluator, In
 from tqdm import tqdm
 import itertools
 from sklearn.preprocessing import minmax_scale, LabelEncoder
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 from xgboost import XGBRegressor, XGBClassifier
 
 from .utils import risk_fn
@@ -846,7 +846,7 @@ class PrivacyMetrics:
     def DOMIAS(
             self,
             device: str
-    ) -> (float, float):
+    ) -> (float, float, np.array):
         """ DOMIAS proposed in: https://arxiv.org/pdf/2302.12580,
             original code: https://github.com/vanderschaarlab/DOMIAS/tree/main,
 
@@ -854,7 +854,7 @@ class PrivacyMetrics:
             device: str. Device to use.
 
         Returns:
-            (float, float): DOMIAS and baseline score.
+            (float, float, np.array): DOMIAS and baseline score and the ground truth for classification.
         """
 
         train = self.train.copy()
@@ -876,6 +876,12 @@ class PrivacyMetrics:
                            ignore_index=True).to_numpy()
         X_baseline = pd.concat([train_sets[1], control_sets[1]],
                            ignore_index=True).to_numpy()
+        gt = np.concatenate([np.ones(len(train_sets[1])), np.zeros(len(synthetic_sets[1]))])
+
+        rand_permutation = np.random.permutation(len(X_test))
+        X_test = X_test[rand_permutation]
+        X_baseline = X_baseline[rand_permutation]
+        gt = gt[rand_permutation]
 
         _, real_model = density_estimator_trainer(train_sets[0].to_numpy())
         real_density = np.exp(
@@ -908,5 +914,25 @@ class PrivacyMetrics:
             .numpy()
         )
 
-        return synth_density/(real_density + 1e-8), baseline_density/(real_density_baseline + 1e-8)
+        return synth_density/(real_density + 1e-8), baseline_density/(real_density_baseline + 1e-8), gt
+
+    def DOMIAS_metrics(
+            self,
+            score: np.array,
+            ground_truth: np.array,
+    ) -> (float, float):
+        """ Computes the AUC for DOMIAS scores.
+
+        Args:
+            score: np.array. DOMIAS scores.
+            ground_truth: np.array. Ground truth labels.
+
+        Returns:
+            float: AUC score.
+        """
+
+        y_pred = score > 0.5
+        acc = accuracy_score(ground_truth, y_pred)
+        auc = roc_auc_score(ground_truth, score)
+        return acc, auc
 
