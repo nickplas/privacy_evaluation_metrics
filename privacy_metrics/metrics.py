@@ -102,7 +102,8 @@ class PrivacyMetrics:
 
 
     def identical_match_sharing(
-            self
+            self,
+            iterations: int = 1000
     ) -> (float, float):
         """Computes the identical match sharing metric between two dataframes, e.g. the
             portion of rows in the synthetic dataset that are copies of rows in the train.
@@ -111,7 +112,10 @@ class PrivacyMetrics:
             float: The identical match sharing metric.
         """
         score = self.__ims(self.train, self.synthetic)
-        error = self.__compute_confidence_interval_identical_match_sharing()
+        if iterations > 1 :
+            error = self.__compute_confidence_interval_identical_match_sharing(iterations)
+        else:
+            error = 0
         return score, error
 
     # DCR
@@ -121,7 +125,8 @@ class PrivacyMetrics:
             srd: np.ndarray,
             alpha: int,
             confidence_level: float = 0.95,
-            iterations: int = 1000
+            iterations: int = 1000,
+            verbose: bool = False
     ) -> float:
         """ Computes the confidence interval for distance to the closest record via bootstrapping.
         Args:
@@ -138,7 +143,7 @@ class PrivacyMetrics:
         samples_rrd = [np.random.choice(rrd, size=len(rrd), replace=True) for _ in range(iterations)]
 
         risk_values = [compute_values_below_alpha_percentile(rr, sr, alpha) for sr, rr in
-                       tqdm(zip(samples_srd, samples_rrd), desc='Computing confidence interval')]
+                       tqdm(zip(samples_srd, samples_rrd), desc='Computing confidence interval', disable=not verbose)]
 
         lower_confidence_level = (1 - confidence_level) / 2
         upper_confidence_level = 1 - lower_confidence_level
@@ -154,6 +159,8 @@ class PrivacyMetrics:
             alpha: int = 2,
             plot: bool = False,
             faiss: bool = False,
+            iterations: int = 1000,
+            verbose: bool = False,
     ) -> (np.ndarray, np.ndarray):
         """ Computes the distance to the closest record for a pair of datasets, e.g. the portion of synthetic records
             with a smaller distance to real records than a fixed percentile of the Real-to-Real distance distribution.
@@ -170,24 +177,31 @@ class PrivacyMetrics:
         preproc = Preprocessor(self.schema)
         index = NearestNeighbor_faiss(k=k) if faiss else NearestNeighbor_sklearn(k=k)
 
-        print('fitting')
+        if verbose:
+            print('fitting')
         preproc.fit(self.train)
-        print('transforming')
+        if verbose:
+            print('transforming')
         preproc_real = preproc.transform(self.train)
         preproc_synth = preproc.transform(self.synthetic)
 
         preproc_real = np.concatenate([arr.reshape(-1, 1) for arr in preproc_real.values()], axis=1)
         preproc_synth = np.concatenate([arr.reshape(-1, 1) for arr in preproc_synth.values()], axis=1)
 
-        print('Computing Index')
+        if verbose:
+            print('Computing Index')
         nearest_neighbor_data = index.compute_nearest_neighbors(preproc_real, preproc_synth)
 
         srd = nearest_neighbor_data.d_ratio
         rrd = nearest_neighbor_data.dx_ratio
 
-        print('Computing Scores')
+        if verbose:
+            print('Computing Scores')
         score = compute_values_below_alpha_percentile(rrd, srd, alpha)
-        error = self.__compute_confidence_interval_distance_to_closest_record(rrd, srd, alpha)
+        if iterations > 1:
+            error = self.__compute_confidence_interval_distance_to_closest_record(rrd, srd, alpha, iterations=iterations, verbose=verbose)
+        else:
+            error = 0
 
         if plot:
             plt.hist(srd, alpha=0.5, bins=np.linspace(0, 2, 40), density=True, label='SRD')
@@ -310,6 +324,7 @@ class PrivacyMetrics:
             interval: int = 100,
             factor: float = 1.0,
             rows: int | None = None,
+            iterations: int = 1000
     ) -> (float, float):
         """Computes no box membership inference attack.
 
@@ -324,7 +339,10 @@ class PrivacyMetrics:
         if rows is None:
             rows = int(len(self.train) / 2)
         risk = self.__mia(self.train, self.synthetic, self.control, interval, factor, rows)[0]
-        ci = self.__compute_confidence_interval_no_box_membership_inference_attack(interval, factor, rows)
+        if iterations > 1:
+            ci = self.__compute_confidence_interval_no_box_membership_inference_attack(interval=interval, factor=factor, rows=rows, iterations=iterations)
+        else:
+            ci = 0
         return risk, ci
 
     # ML Inference
@@ -425,7 +443,10 @@ class PrivacyMetrics:
         risk_train = self.__inference_with_ML(self.synthetic, self.train, target)
         risk_control = self.__inference_with_ML(self.synthetic, self.control, target)
         risk = (risk_train - risk_control) / (1 - risk_control)
-        ci = self.__compute_confidence_interval_inference_with_ML(target, confidence_level, iterations)
+        if iterations > 1:
+            ci = self.__compute_confidence_interval_inference_with_ML(target, confidence_level, iterations)
+        else:
+            ci = 0
         return risk, ci
 
     # GTCAP
@@ -571,6 +592,7 @@ class PrivacyMetrics:
             radius: float,
             numeric_cols: list,
             minmax: bool = True,
+            iterations: int = 1000
     ) -> (float, float):
         """ Internal method to compute GTCAP score
 
@@ -588,7 +610,10 @@ class PrivacyMetrics:
         risk_control = self.__gtcap(self.control, self.synthetic, self.schema, keys, target, radius, numeric_cols,
                                    minmax)
         risk = risk_fn(risk_train, risk_control)
-        ci = self.__compute_confidence_interval_gtcap(keys, target, radius, numeric_cols)
+        if iterations > 0:
+            ci = self.__compute_confidence_interval_gtcap(keys, target, radius, numeric_cols, iterations=iterations)
+        else:
+            ci = 0
         return risk, ci
 
     # Anonymeter metrics
@@ -754,7 +779,7 @@ class PrivacyMetrics:
             confidence_level: float = 0.95,
             keep_unreliable: bool = False
     ) -> dict:
-        """Calculates Linkability risk for different columns combinations and returns the highest value.
+        """Calculates Inference risk for different columns combinations and returns the highest value.
 
         Args:
             na: int. Number of attacks.
@@ -861,12 +886,21 @@ class PrivacyMetrics:
         synthetic = self.synthetic.copy()
         control = self.control.copy()
 
+        min_len = min(len(train), len(synthetic), len(control))
+        train = train.sample(n=min_len, random_state=42).reset_index(drop=True)
+        synthetic = synthetic.sample(n=min_len, random_state=42).reset_index(drop=True)
+        control = control.sample(n=min_len, random_state=42).reset_index(drop=True)
+
         for c in self.train.columns:
             if self.schema[c] == Data.CATEGORICAL:
                 le = LabelEncoder()
                 train[c] = pd.to_numeric(le.fit_transform(train[c]))
                 synthetic[c] = pd.to_numeric(le.fit_transform(synthetic[c]))
                 control[c] = pd.to_numeric(le.fit_transform(control[c]))
+
+        train.dropna(inplace=True)
+        synthetic.dropna(inplace=True)
+        control.dropna(inplace=True)
 
         train_sets = train_test_split(train, test_size=0.5, random_state=42)
         synthetic_sets = train_test_split(synthetic, test_size=0.5, random_state=42)
@@ -876,7 +910,7 @@ class PrivacyMetrics:
                            ignore_index=True).to_numpy()
         X_baseline = pd.concat([train_sets[1], control_sets[1]],
                            ignore_index=True).to_numpy()
-        gt = np.concatenate([np.ones(len(train_sets[1])), np.zeros(len(synthetic_sets[1]))])
+        gt = np.concatenate([np.zeros(len(train_sets[1])), np.ones(len(synthetic_sets[1]))])
 
         rand_permutation = np.random.permutation(len(X_test))
         X_test = X_test[rand_permutation]

@@ -4,7 +4,7 @@ from typing import Dict, List
 from xgboost import XGBClassifier, XGBRegressor
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, root_mean_squared_error
-from scipy.stats import ks_2samp, chisquare
+from scipy.stats import ks_2samp, chisquare, chi2_contingency
 from sklearn.metrics.pairwise import rbf_kernel
 
 from .utils import categorical_kernel, kernel_score, normalized_polynomial_kernel, normalized_linear_kernel
@@ -171,11 +171,12 @@ class UtilityMetrics:
             if self.schema[c] == Data.CATEGORICAL:
                 train_counts = self.train[c].value_counts()
                 synthetic_counts = self.synthetic[c].value_counts()
+                if len(train_counts.keys()) != len(synthetic_counts.keys()):
+                    missing_keys = set(train_counts.keys()) - set(synthetic_counts.keys())
 
-                print(train_counts)
-                print(synthetic_counts)
-
-                stat, p_val = chisquare(train_counts, synthetic_counts)
+                    for k in missing_keys:
+                        synthetic_counts[k] = 0
+                stat, p_val, _, _ = chi2_contingency([train_counts, synthetic_counts])
                 res[c] = {'statistic': stat, 'p_value': p_val}
         return res
 
