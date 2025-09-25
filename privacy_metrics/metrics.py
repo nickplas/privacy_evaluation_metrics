@@ -902,9 +902,9 @@ class PrivacyMetrics:
         synthetic.dropna(inplace=True)
         control.dropna(inplace=True)
 
-        train_sets = train_test_split(train, test_size=0.5, random_state=42)
-        synthetic_sets = train_test_split(synthetic, test_size=0.5, random_state=42)
-        control_sets = train_test_split(control, test_size=0.5, random_state=42)
+        train_sets = train_test_split(train, test_size=0.5)
+        synthetic_sets = train_test_split(synthetic, test_size=0.5)
+        control_sets = train_test_split(control, test_size=0.5)
 
         X_test = pd.concat([train_sets[1], synthetic_sets[1]],
                            ignore_index=True).to_numpy()
