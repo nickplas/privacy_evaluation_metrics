@@ -6,6 +6,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score, root_mean_squared_error
 from scipy.stats import ks_2samp, chisquare, chi2_contingency
 from sklearn.metrics.pairwise import rbf_kernel
+from sklearn.model_selection import train_test_split
 
 from .utils import categorical_kernel, kernel_score, normalized_polynomial_kernel, normalized_linear_kernel
 from privacy_metrics.preprocessor import Data
@@ -50,36 +51,36 @@ class UtilityMetrics:
         Returns:
             float: The accuracy of the machine learning model.
         """
-        self.train.dropna(inplace=True)
-        self.synthetic.dropna(inplace=True)
-        self.train['source'] = 0
-        self.synthetic['source'] = 1
+        train = self.train.copy()
+        synthetic = self.synthetic.copy()
+        train.dropna(inplace=True)
+        synthetic.dropna(inplace=True)
+        train['source'] = 0
+        synthetic['source'] = 1
 
-        t1 = self.train.head(int(len(self.train) / 2))
-        t2 = self.train.tail(int(len(self.train) / 2))
-        s1 = self.synthetic.head(int(len(self.train) / 2))
-        s2 = self.synthetic.tail(int(len(self.train) / 2))
+        train.sample(frac=1)
+        synthetic.sample(frac=1)
 
-        dataset_train = pd.concat([t1, s1], ignore_index=True).sample(frac=1)
-        dataset_test = pd.concat([t2, s2], ignore_index=True).sample(frac=1)
-        for c in dataset_train.columns:
-            if dataset_train[c].dtype == 'object':
+        full_data = pd.concat([train, synthetic], ignore_index=True)
+        for c in full_data.columns:
+            if full_data[c].dtype == 'object':
                 le = LabelEncoder()
-                dataset_train[c] = le.fit_transform(dataset_train[c]).astype(int)
-                dataset_test[c] = le.fit_transform(dataset_test[c]).astype(int)
+                full_data[c] = le.fit_transform(full_data[c]).astype(int)
 
-        dataset_train_y = dataset_train['source']
-        dataset_train_x = dataset_train.drop('source', axis=1, inplace=False)
-        dataset_test_y = dataset_test['source']
-        dataset_test_x = dataset_test.drop('source', axis=1, inplace=False)
-        dataset_train_x.drop('index', axis=1, inplace=True) if 'index' in dataset_train_x.columns else 0
-        dataset_test_x.drop('index', axis=1, inplace=True) if 'index' in dataset_test_x.columns else 0
+        y = full_data['source']
+        X = full_data.drop('source', axis=1)
+
+        train_x, test_x, train_y, test_y = train_test_split(X,y, test_size=0.2 )
+
+        train_x.drop('index', axis=1, inplace=True) if 'index' in train_x.columns else 0
+        test_x.drop('index', axis=1, inplace=True) if 'index' in test_x.columns else 0
         model = XGBClassifier()
         acc_score_fn = accuracy_score
-        model.fit(dataset_train_x.values, dataset_train_y)
-        pred = model.predict(dataset_test_x.values)
+        model.fit(train_x.values, train_y)
+        pred = model.predict(test_x.values)
 
-        return acc_score_fn(dataset_test_y, pred)
+        return acc_score_fn(test_y, pred)
+
 
     def ml_utility(
             self,

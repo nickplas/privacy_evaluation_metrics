@@ -26,6 +26,8 @@ from domias.bnaf.density_estimation import compute_log_p_x, density_estimator_tr
 import torch
 from sklearn.model_selection import train_test_split
 
+from scipy import stats
+
 class PrivacyMetrics:
     """Privacy metrics class"""
 
@@ -69,7 +71,11 @@ class PrivacyMetrics:
         Returns:
             float: The identical match sharing metric.
         """
-        return len(pd.merge(train, synth, how='inner')) / len(synth)
+
+        train_np = pd.util.hash_pandas_object(train, index=False).values
+        synth_np = pd.util.hash_pandas_object(synth, index=False).values
+        id_counts = np.intersect1d(train_np, synth_np).size
+        return id_counts / len(synth)
 
 
     def __compute_confidence_interval_identical_match_sharing(
@@ -716,6 +722,7 @@ class PrivacyMetrics:
         Returns:
             Tuple:The maximum risk computed, its confidence interval, a list containing the column split used in the attack.
         """
+        print('Computing linkability risk...')
         cols = list(self.train.columns)
         linking_risks = {'value': [], 'ci': [], 'col_splits': [], 'train_scores': [], 'control_scores': [],
                          'baseline_score': []}
@@ -742,7 +749,7 @@ class PrivacyMetrics:
             for i in range(2, int(len(cols) // 2) + 1):
                 for split in itertools.combinations(cols, i):
                     remaining = list(set(cols) - set(split))
-                    aux_cols = [split, remaining]
+                    aux_cols = [list(split), list(remaining)]
                     evaluator = LinkabilityEvaluator(ori=self.train,
                                                      syn=self.synthetic,
                                                      control=self.control,
@@ -917,14 +924,14 @@ class PrivacyMetrics:
         X_baseline = X_baseline[rand_permutation]
         gt = gt[rand_permutation]
 
-        _, real_model = density_estimator_trainer(train_sets[0].to_numpy())
+        _, real_model = density_estimator_trainer(train_sets[0].to_numpy(), device=device)
         real_density = np.exp(
                 compute_log_p_x(real_model, torch.as_tensor(X_test).float().to(device))
                 .cpu()
                 .detach()
                 .numpy()
         )
-        _, synth_model = density_estimator_trainer(synthetic_sets[0].to_numpy())
+        _, synth_model = density_estimator_trainer(synthetic_sets[0].to_numpy(), device=device)
         synth_density = np.exp(
             compute_log_p_x(synth_model, torch.as_tensor(X_test).float().to(device))
             .cpu()
@@ -932,15 +939,15 @@ class PrivacyMetrics:
             .numpy()
         )
 
-        _, real_model_baseline = density_estimator_trainer(train_sets[0].to_numpy())
+        _, real_model_baseline = density_estimator_trainer(train_sets[0].to_numpy(), device=device)
         real_density_baseline = np.exp(
-            compute_log_p_x(real_model, torch.as_tensor(X_baseline).float().to(device))
+            compute_log_p_x(real_model_baseline, torch.as_tensor(X_baseline).float().to(device))
             .cpu()
             .detach()
             .numpy()
         )
 
-        _, baseline_model = density_estimator_trainer(control_sets[0].to_numpy())
+        _, baseline_model = density_estimator_trainer(control_sets[0].to_numpy(), device=device)
         baseline_density = np.exp(
             compute_log_p_x(baseline_model, torch.as_tensor(X_baseline).float().to(device))
             .cpu()
@@ -970,3 +977,99 @@ class PrivacyMetrics:
         auc = roc_auc_score(ground_truth, score)
         return acc, auc
 
+    def DOMIAS_NEW(
+            self,
+            release: pd.DataFrame,
+            device: str,
+            density_estimator: str = 'bnaf',
+            baseline: bool = True
+    ):
+        train = self.train.copy()
+        synthetic = self.synthetic.copy()
+        control = self.control.copy()
+
+        # train.dropna(inplace=True)
+        # synthetic.dropna(inplace=True)
+        # control.dropna(inplace=True)
+        # release.dropna(inplace=True)
+
+        # min_len = min(len(train), len(synthetic), len(control), len(release))
+        # train = train.sample(n=min_len, random_state=42).reset_index(drop=True)
+        # synthetic = synthetic.sample(n=min_len, random_state=42).reset_index(drop=True)
+        # control = control.sample(n=min_len, random_state=42).reset_index(drop=True)
+        # release = release.sample(n=min_len, random_state=42).reset_index(drop=True)
+
+        preprocessor = Preprocessor(self.schema)
+        preprocessor.fit(train)
+        train = preprocessor.transform(train)
+        synthetic = preprocessor.transform(synthetic)
+        control = preprocessor.transform(control)
+        release = preprocessor.transform(release)
+
+        train = np.concatenate([arr.reshape(-1, 1) for arr in train.values()], axis=1)
+        release = np.concatenate([arr.reshape(-1, 1) for arr in release.values()], axis=1)
+        synthetic = np.concatenate([arr.reshape(-1, 1) for arr in synthetic.values()], axis=1)
+        control = np.concatenate([arr.reshape(-1, 1) for arr in control.values()], axis=1)
+
+        X_test = np.concatenate([train, control])
+        X_baseline = X_test.copy()
+        gt = np.concatenate([np.ones(len(train)), np.zeros(len(control))])
+
+        rand_permutation = np.random.permutation(len(X_test))
+        X_test = X_test[rand_permutation]
+        X_baseline = X_baseline[rand_permutation]
+        gt = gt[rand_permutation]
+
+        if density_estimator == 'bnaf':
+            _, real_model = density_estimator_trainer(release, device=device)
+            real_model.to(device)
+            real_density = np.exp(
+                compute_log_p_x(real_model, torch.as_tensor(X_test).float().to(device))
+                .cpu()
+                .detach()
+                .numpy()
+            )
+            print('real density:', real_density)
+            _, synth_model = density_estimator_trainer(synthetic, device=device)
+            synth_model.to(device)
+            synth_density = np.exp(
+                compute_log_p_x(synth_model, torch.as_tensor(X_test).float().to(device))
+                .cpu()
+                .detach()
+                .numpy()
+            )
+            print('synth density:', synth_density)
+
+            if baseline:
+                _, real_model_baseline = density_estimator_trainer(train, device=device)
+                real_model_baseline.to(device)
+                real_density_baseline = np.exp(
+                    compute_log_p_x(real_model_baseline, torch.as_tensor(X_baseline).float().to(device))
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
+
+                _, baseline_model = density_estimator_trainer(control, device=device)
+                baseline_model.to(device)
+                baseline_density = np.exp(
+                    compute_log_p_x(baseline_model, torch.as_tensor(X_baseline).float().to(device))
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
+            else:
+                baseline_density = 0.0
+                real_density_baseline = 1.0
+
+        elif density_estimator == 'kde':
+            density_gen = stats.gaussian_kde(synthetic.transpose(1, 0))
+            density_data = stats.gaussian_kde(release.transpose(1, 0))
+            synth_density = density_gen(X_test.transpose(1, 0))
+            real_density = density_data(X_test.transpose(1, 0))
+            baseline_density = 0.0
+            real_density_baseline = 1.0
+        else:
+            raise NotImplementedError
+
+        return synth_density / (real_density + 1e-8), baseline_density / (real_density_baseline + 1e-8), gt
