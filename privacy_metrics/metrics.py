@@ -875,118 +875,32 @@ class PrivacyMetrics:
         return inference_risks
 
 
-    def DOMIAS(
-            self,
-            device: str
-    ) -> (float, float, np.array):
-        """ DOMIAS proposed in: https://arxiv.org/pdf/2302.12580,
-            original code: https://github.com/vanderschaarlab/DOMIAS/tree/main,
 
-        Args:
-            device: str. Device to use.
-
-        Returns:
-            (float, float, np.array): DOMIAS and baseline score and the ground truth for classification.
-        """
-
-        train = self.train.copy()
-        synthetic = self.synthetic.copy()
-        control = self.control.copy()
-
-        min_len = min(len(train), len(synthetic), len(control))
-        train = train.sample(n=min_len, random_state=42).reset_index(drop=True)
-        synthetic = synthetic.sample(n=min_len, random_state=42).reset_index(drop=True)
-        control = control.sample(n=min_len, random_state=42).reset_index(drop=True)
-
-        for c in self.train.columns:
-            if self.schema[c] == Data.CATEGORICAL:
-                le = LabelEncoder()
-                train[c] = pd.to_numeric(le.fit_transform(train[c]))
-                synthetic[c] = pd.to_numeric(le.fit_transform(synthetic[c]))
-                control[c] = pd.to_numeric(le.fit_transform(control[c]))
-
-        train.dropna(inplace=True)
-        synthetic.dropna(inplace=True)
-        control.dropna(inplace=True)
-
-        train_sets = train_test_split(train, test_size=0.5)
-        synthetic_sets = train_test_split(synthetic, test_size=0.5)
-        control_sets = train_test_split(control, test_size=0.5)
-
-        X_test = pd.concat([train_sets[1], synthetic_sets[1]],
-                           ignore_index=True).to_numpy()
-        X_baseline = pd.concat([train_sets[1], control_sets[1]],
-                           ignore_index=True).to_numpy()
-        gt = np.concatenate([np.zeros(len(train_sets[1])), np.ones(len(synthetic_sets[1]))])
-
-        rand_permutation = np.random.permutation(len(X_test))
-        X_test = X_test[rand_permutation]
-        X_baseline = X_baseline[rand_permutation]
-        gt = gt[rand_permutation]
-
-        _, real_model = density_estimator_trainer(train_sets[0].to_numpy(), device=device)
-        real_density = np.exp(
-                compute_log_p_x(real_model, torch.as_tensor(X_test).float().to(device))
-                .cpu()
-                .detach()
-                .numpy()
-        )
-        _, synth_model = density_estimator_trainer(synthetic_sets[0].to_numpy(), device=device)
-        synth_density = np.exp(
-            compute_log_p_x(synth_model, torch.as_tensor(X_test).float().to(device))
-            .cpu()
-            .detach()
-            .numpy()
-        )
-
-        _, real_model_baseline = density_estimator_trainer(train_sets[0].to_numpy(), device=device)
-        real_density_baseline = np.exp(
-            compute_log_p_x(real_model_baseline, torch.as_tensor(X_baseline).float().to(device))
-            .cpu()
-            .detach()
-            .numpy()
-        )
-
-        _, baseline_model = density_estimator_trainer(control_sets[0].to_numpy(), device=device)
-        baseline_density = np.exp(
-            compute_log_p_x(baseline_model, torch.as_tensor(X_baseline).float().to(device))
-            .cpu()
-            .detach()
-            .numpy()
-        )
-
-        return synth_density/(real_density + 1e-8), baseline_density/(real_density_baseline + 1e-8), gt
-
-    def DOMIAS_metrics(
-            self,
-            score: np.array,
-            ground_truth: np.array,
-    ) -> (float, float):
-        """ Computes the AUC for DOMIAS scores.
-
-        Args:
-            score: np.array. DOMIAS scores.
-            ground_truth: np.array. Ground truth labels.
-
-        Returns:
-            float: AUC score.
-        """
-
-        y_pred = score > 0.5
-        acc = accuracy_score(ground_truth, y_pred)
-        auc = roc_auc_score(ground_truth, score)
-        return acc, auc
 
     def DOMIAS_NEW(
             self,
             release: pd.DataFrame,
             device: str,
             density_estimator: str = 'bnaf',
-            baseline: bool = True
-    ):
+    ) -> (float, np.array):
+        """ DOMIAS proposed in: https://arxiv.org/pdf/2302.12580,
+                    original code: https://github.com/vanderschaarlab/DOMIAS/tree/main,
+
+            Args:
+                release: pd.DataFrame. Holdout set that allows DOMIAS computations.
+                device: str. Device to use.
+                density_estimator: str. Density estimation method (possible methods: 'bnaf' and 'kde').
+
+            Returns:
+                (float, np.array): DOMIAS score and the ground truth for classification.
+        """
+
+
         train = self.train.copy()
         synthetic = self.synthetic.copy()
         control = self.control.copy()
+
+        #TODO: check if should I have to treat nan values or just the preprocessor is ok
 
         # train.dropna(inplace=True)
         # synthetic.dropna(inplace=True)
@@ -1040,36 +954,33 @@ class PrivacyMetrics:
             )
             print('synth density:', synth_density)
 
-            if baseline:
-                _, real_model_baseline = density_estimator_trainer(train, device=device)
-                real_model_baseline.to(device)
-                real_density_baseline = np.exp(
-                    compute_log_p_x(real_model_baseline, torch.as_tensor(X_baseline).float().to(device))
-                    .cpu()
-                    .detach()
-                    .numpy()
-                )
-
-                _, baseline_model = density_estimator_trainer(control, device=device)
-                baseline_model.to(device)
-                baseline_density = np.exp(
-                    compute_log_p_x(baseline_model, torch.as_tensor(X_baseline).float().to(device))
-                    .cpu()
-                    .detach()
-                    .numpy()
-                )
-            else:
-                baseline_density = 0.0
-                real_density_baseline = 1.0
-
         elif density_estimator == 'kde':
             density_gen = stats.gaussian_kde(synthetic.transpose(1, 0))
             density_data = stats.gaussian_kde(release.transpose(1, 0))
             synth_density = density_gen(X_test.transpose(1, 0))
             real_density = density_data(X_test.transpose(1, 0))
-            baseline_density = 0.0
-            real_density_baseline = 1.0
         else:
             raise NotImplementedError
 
-        return synth_density / (real_density + 1e-8), baseline_density / (real_density_baseline + 1e-8), gt
+        return synth_density / (real_density + 1e-8), gt
+
+
+    def DOMIAS_metrics(
+            self,
+            score: np.array,
+            ground_truth: np.array,
+    ) -> (float, float):
+        """ Computes the AUC for DOMIAS scores.
+
+        Args:
+            score: np.array. DOMIAS scores.
+            ground_truth: np.array. Ground truth labels.
+
+        Returns:
+            float: AUC score.
+        """
+
+        y_pred = score > 0.5
+        acc = accuracy_score(ground_truth, y_pred)
+        auc = roc_auc_score(ground_truth, score)
+        return acc, auc

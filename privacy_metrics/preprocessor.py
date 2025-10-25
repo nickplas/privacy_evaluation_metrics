@@ -36,7 +36,7 @@ class StandardScalerNAN:
     def transform(self, data: pd.Series):
         data = data.to_frame()
         data = data.astype(float)
-        data.fillna(data.mean(), inplace=True)
+        data.fillna(data.mean(), inplace=True) #TODO: add other methods to handle NANs
         # print(self.preproc.transform(data).shape)
         return self.preproc.transform(data)
 
@@ -101,7 +101,7 @@ class Preprocessor:
 
     def transform(self, data: pd.DataFrame) -> Dict:
         d = {}
-        for name, preproc in tqdm(self.preprocessor.items(), desc="Transforming preprocessor", disable=not self.verbose):
+        for name, preproc in tqdm(self.preprocessor.items(), desc="Transforming data", disable=not self.verbose):
             if preproc is None:
                 continue
             d[name] = preproc.transform(data[name])
