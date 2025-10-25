@@ -29,6 +29,9 @@ Adult dataset that can be downloaded from [here](https://archive.ics.uci.edu/dat
 - [x] GTCAP
 - [x] DOMIAS
 
+### DOMIAS Issue
+Most of the times Domias may incur in a Segmentation Fault. Set the number of threads to 1 to make it work. 
+
 # Tested Utility Metrics
 
 - [x] Machine Learning Efficacy
