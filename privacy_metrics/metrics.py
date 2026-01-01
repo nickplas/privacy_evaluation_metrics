@@ -24,7 +24,8 @@ from sklearn.metrics import auc
 
 from domias.bnaf.density_estimation import compute_log_p_x, density_estimator_trainer
 import torch
-from sklearn.model_selection import train_test_split
+from umap import UMAP
+import warnings
 
 from scipy import stats
 
@@ -875,9 +876,7 @@ class PrivacyMetrics:
         return inference_risks
 
 
-
-
-    def DOMIAS_NEW(
+    def DOMIAS(
             self,
             release: pd.DataFrame,
             device: str,
@@ -900,19 +899,6 @@ class PrivacyMetrics:
         synthetic = self.synthetic.copy()
         control = self.control.copy()
 
-        #TODO: check if should I have to treat nan values or just the preprocessor is ok
-
-        # train.dropna(inplace=True)
-        # synthetic.dropna(inplace=True)
-        # control.dropna(inplace=True)
-        # release.dropna(inplace=True)
-
-        # min_len = min(len(train), len(synthetic), len(control), len(release))
-        # train = train.sample(n=min_len, random_state=42).reset_index(drop=True)
-        # synthetic = synthetic.sample(n=min_len, random_state=42).reset_index(drop=True)
-        # control = control.sample(n=min_len, random_state=42).reset_index(drop=True)
-        # release = release.sample(n=min_len, random_state=42).reset_index(drop=True)
-
         preprocessor = Preprocessor(self.schema)
         preprocessor.fit(train)
         train = preprocessor.transform(train)
@@ -925,13 +911,23 @@ class PrivacyMetrics:
         synthetic = np.concatenate([arr.reshape(-1, 1) for arr in synthetic.values()], axis=1)
         control = np.concatenate([arr.reshape(-1, 1) for arr in control.values()], axis=1)
 
+        if train.shape[1] != np.linalg.matrix_rank(train):
+            warnings.warn('Matrix is singular, apply UMAP to reduce its dimension to apply density estimation.')
+            umap_obj = UMAP(n_components=np.linalg.matrix_rank(train))
+            real_dataset = np.concatenate((train, release, control), axis=0)
+            # print(real_dataset.shape)
+            umap_obj.fit(real_dataset)
+            train = umap_obj.transform(train)
+            synthetic = umap_obj.transform(synthetic)
+            release = umap_obj.transform(release)
+            control = umap_obj.transform(control)
+
+
         X_test = np.concatenate([train, control])
-        X_baseline = X_test.copy()
         gt = np.concatenate([np.ones(len(train)), np.zeros(len(control))])
 
         rand_permutation = np.random.permutation(len(X_test))
         X_test = X_test[rand_permutation]
-        X_baseline = X_baseline[rand_permutation]
         gt = gt[rand_permutation]
 
         if density_estimator == 'bnaf':
@@ -943,7 +939,6 @@ class PrivacyMetrics:
                 .detach()
                 .numpy()
             )
-            print('real density:', real_density)
             _, synth_model = density_estimator_trainer(synthetic, device=device)
             synth_model.to(device)
             synth_density = np.exp(
@@ -952,7 +947,6 @@ class PrivacyMetrics:
                 .detach()
                 .numpy()
             )
-            print('synth density:', synth_density)
 
         elif density_estimator == 'kde':
             density_gen = stats.gaussian_kde(synthetic.transpose(1, 0))

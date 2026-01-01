@@ -1,6 +1,6 @@
 # privacy_evaluation_metrics
 
-A python package for evaluating privacy and utility for single-table datasets.
+A python package for evaluating privacy and utility for single-table datasets for the [paper "EMPIRICAL EVALUATION OF STRUCTURED SYNTHETIC DATA PRIVACY METRICS: NOVEL EXPERIMENTAL FRAMEWORK"](https://arxiv.org/pdf/2512.16284) by Milton Nicolás Plasencia Palacios, Alexander Boudewijn, Sebastiano Saccani, Andrea Filippo Ferraris, Diana Sofronieva, Giuseppe D’Acquisto Filiberto Brozzetti, Daniele Panfilo, and Luca Bortolussi.
 
 ### Installation
 
@@ -8,8 +8,8 @@ A python package for evaluating privacy and utility for single-table datasets.
 path/to/privacy_eval$ pip install .
 ```
 
-To use the anonymeter package follow the installation instructions in https://github.com/statice/anonymeter. To install
-the embedding method follow the installation instruction in https://github.com/aindo-com/privacy-eval-paper.
+To use the anonymeter package follow the installation instructions in [link to anonymeter](https://github.com/statice/anonymeter). To install
+the embedding method follow the installation instruction in [link to contrastive learning method](https://github.com/aindo-com/privacy-eval-paper).
 
 ---
 
